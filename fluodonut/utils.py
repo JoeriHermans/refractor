@@ -1,3 +1,0 @@
-"""
-fluodonut utilities.
-"""
