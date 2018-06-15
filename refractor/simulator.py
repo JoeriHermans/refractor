@@ -18,10 +18,10 @@ import itertools
 
 class Simulator:
 
-    def __init__(self, cosmology, lens, source, parallelism=10):
+    def __init__(self, cosmology, parallelism=10):
         self._cosmology = cosmology
-        self._lens = lens
-        self._source = source
+        self._lens = None
+        self._source = None
         self._distance_lens = None
         self._distance_lens_source = None
         self._distance_source = None
@@ -31,20 +31,8 @@ class Simulator:
         self._mpc_per_sourcepixel = 0.0
         self._parallelism = None
         self.set_parallelism(parallelism)
-        self._initialize_planes()
 
     def _initialize_planes(self):
-        # Obtain the axial angular radius of the lens plane in arcseconds.
-        r_x, r_y = self._lens.get_angular_radius()
-        axes_x = np.linspace(-r_x, r_x, self._lens.shape[0])
-        axes_y = np.linspace(-r_y, r_y, self._lens.shape[1])
-        # Convert to radians.
-        axes_x = axes_x.to(u.rad)
-        axes_y = axes_y.to(u.rad)
-        # Pre-allocate the rays and unit-rays of the ray-tracer.
-        xx, yy = np.meshgrid(axes_x, axes_y)
-        self._thetas = torch.tensor(np.array([xx, yy]), dtype=torch.float64)
-        self._thetas_unit = self._thetas / torch.norm(self._thetas, p=2, dim=0)
         # Set the plane distances according to the cosmology.
         z_lens = self._lens.get_redshift()
         z_source = self._source.get_redshift()
@@ -54,11 +42,19 @@ class Simulator:
         # Compute several source characteristics.
         self._half_width_source = ((torch.tensor(self._source.shape, dtype=torch.float64)) - 1) / 2
         self._half_width_source = self._half_width_source.reshape(2, 1, 1)
-        r = r_x # Assuming square field of views.
+        r_x, r_y = self._lens.get_angular_radius()
+        r = r_x # Assume square field of view.
         source_shape = torch.tensor(self._source.shape, dtype=torch.float64)
         r = torch.tensor(r.to(u.rad).value, dtype=torch.float64)
         self._mpc_per_sourcepixel = (2 * torch.tan(r) *self._distance_source.value) / (source_shape - 1)
         self._mpc_per_sourcepixel = self._mpc_per_sourcepixel.reshape(-1, 1, 1)
+
+    def _clear_planes(self):
+        self._distance_lens = None
+        self._distance_source = None
+        self._distance_lens_source = None
+        self._half_width_source = None
+        self._mpc_per_sourcepixel = None
 
     def set_parallelism(self, num_tasks):
         self._parallelism = num_tasks
@@ -78,11 +74,14 @@ class Simulator:
     def get_source(self):
         return self._plane_source
 
-    def trace(self):
+    def trace(self, lens, source):
+        self._lens = lens
+        self._source = source
+        self._initialize_planes()
         lensed = torch.zeros(self._lens.shape, dtype=torch.float64)
-        alphas_approx = self._lens.get_alphas(self._thetas, self._cosmology)
+        alphas = self._lens.get_alphas(self._cosmology)
         factor = (self._distance_lens_source / self._distance_source).value
-        betas = self._thetas - factor * alphas_approx * self._thetas_unit
+        betas = self._lens.get_thetas() - factor * alphas
         # Obtain the pixel indexes.
         sources = ((torch.tan(betas) * self._distance_source.value) / self._mpc_per_sourcepixel) + self._half_width_source
         sources = sources.long().permute((2, 1, 0))
@@ -94,5 +93,7 @@ class Simulator:
                      continue
                  pixels = sources[row][column]
                  lensed[row][column] = self._source.data[pixels[0]][pixels[1]]
+        # Clear the plane information.
+        self._clear_planes()
 
         return lensed
