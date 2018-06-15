@@ -4,7 +4,7 @@ import PIL
 
 
 def image_to_torch(path, monochrome=False):
-    image = PIL.Image.open("data/" + images[8])
+    image = PIL.Image.open(path)
     if monochrome:
         image = image.convert('L')
     image_data = np.asarray(image.getdata()).reshape(image.size)
