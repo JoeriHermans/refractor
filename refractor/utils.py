@@ -1,6 +1,7 @@
-import numpy as np
 import PIL
-import Pil.Image
+import PIL.Image
+import numpy as np
+import torch
 
 
 
